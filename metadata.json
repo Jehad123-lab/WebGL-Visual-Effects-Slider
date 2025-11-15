@@ -1,0 +1,5 @@
+{
+  "name": "WebGL Visual Effects Slider",
+  "description": "An immersive, fullscreen image slider powered by Three.js and WebGL shaders, featuring seven distinct, customizable transition effects: Glass, Frost, Ripple, Plasma, Timeshift, Glitch, and Warp.",
+  "requestFramePermissions": []
+}
