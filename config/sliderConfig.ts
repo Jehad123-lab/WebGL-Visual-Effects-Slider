@@ -1,7 +1,8 @@
 export const SLIDER_CONFIG = {
   settings: {
     mode: "auto",
-    transitionDuration: 2.5,
+    transitionDuration: 1.8,
+    transitionEase: "expo.inOut",
     autoSlideSpeed: 5000,
     currentEffect: "glass",
     currentEffectPreset: "Default",

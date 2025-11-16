@@ -14,7 +14,8 @@
     "three": "^0.181.1",
     "tweakpane": "^4.0.5",
     "gsap": "^3.13.0",
-    "framer": "^2.4.1"
+    "framer": "^2.4.1",
+    "framer-motion": "^12.23.24"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

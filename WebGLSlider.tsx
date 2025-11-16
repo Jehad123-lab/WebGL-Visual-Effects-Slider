@@ -1,6 +1,8 @@
+
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
+import { motion } from 'framer-motion';
 import { addPropertyControls, ControlType } from 'framer';
 
 // --- STYLES ---
@@ -20,7 +22,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontFamily: theme.fontSans,
     background: theme.colorBg,
     color: theme.colorText,
-    cursor: 'pointer',
     width: '100%',
     height: '100%',
     overflow: 'hidden',
@@ -41,10 +42,8 @@ const styles: { [key: string]: React.CSSProperties } = {
   slideNumber: {
     position: 'absolute',
     top: '50%',
-    left: theme.spacingMd,
     transform: 'translateY(-50%)',
     fontFamily: theme.fontMono,
-    fontSize: '12px',
     fontWeight: 600,
     color: theme.colorText,
     zIndex: 3,
@@ -54,10 +53,8 @@ const styles: { [key: string]: React.CSSProperties } = {
   slideTotal: {
     position: 'absolute',
     top: '50%',
-    right: theme.spacingMd,
     transform: 'translateY(-50%)',
     fontFamily: theme.fontMono,
-    fontSize: '12px',
     fontWeight: 600,
     color: theme.colorText,
     zIndex: 3,
@@ -66,15 +63,14 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   slidesNavigation: {
     position: 'absolute',
-    bottom: theme.spacingMd,
-    left: theme.spacingMd,
-    right: theme.spacingMd,
     display: 'flex',
     gap: 0,
     zIndex: 3,
     pointerEvents: 'all',
   },
   slideNavItem: {
+    position: 'relative',
+    overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
     cursor: 'pointer',
@@ -82,6 +78,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     flex: 1,
     border: 'none',
     background: 'none',
+    textAlign: 'left',
   },
   slideProgressLine: {
     width: '100%',
@@ -100,7 +97,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   slideNavTitle: {
     fontFamily: theme.fontMono,
-    fontSize: '11px',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     color: theme.colorTextMuted,
@@ -353,8 +349,10 @@ const fragmentShader = `
 export function WebGLSlider(props: any) {
     const { ...allProps } = props;
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
     const [slideProgress, setSlideProgress] = useState(0);
+    const [isMobile, setIsMobile] = useState(false);
 
     const slides = [];
     for (let i = 1; i <= 6; i++) {
@@ -371,6 +369,7 @@ export function WebGLSlider(props: any) {
     const autoSlideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentSlideIndexRef = useRef(0);
     const startAutoSlideTimerRef = useRef<(() => void) | null>(null);
+    const scrollAccumulator = useRef(0);
 
     const onProgressUpdate = useCallback((progress: number) => {
         setSlideProgress(progress);
@@ -404,7 +403,7 @@ export function WebGLSlider(props: any) {
         gsap.fromTo(threeState.shaderMaterial.uniforms.uProgress, { value: 0 }, {
             value: 1,
             duration: SLIDER_CONFIG.settings.transitionDuration,
-            ease: "power2.inOut",
+            ease: SLIDER_CONFIG.settings.transitionEase,
             onComplete: () => {
                 threeState.shaderMaterial.uniforms.uProgress.value = 0;
                 threeState.shaderMaterial.uniforms.uTexture1.value = targetTexture;
@@ -415,7 +414,7 @@ export function WebGLSlider(props: any) {
                 }
             }
         });
-    }, [stopAutoSlideTimer, onProgressUpdate, threeState, SLIDER_CONFIG.settings.transitionDuration, props.mode]);
+    }, [stopAutoSlideTimer, onProgressUpdate, threeState, SLIDER_CONFIG.settings.transitionDuration, SLIDER_CONFIG.settings.transitionEase, props.mode]);
 
     const handleSlideChange = useCallback(() => {
         if (isTransitioning.current || !sliderEnabled.current) return;
@@ -450,6 +449,20 @@ export function WebGLSlider(props: any) {
     useEffect(() => {
         startAutoSlideTimerRef.current = startAutoSlideTimer;
     }, [startAutoSlideTimer]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const checkMobile = () => {
+            if(container) setIsMobile(container.offsetWidth <= props.mobileBreakpoint);
+        };
+        const resizeObserver = new ResizeObserver(checkMobile);
+        resizeObserver.observe(container);
+        checkMobile();
+        return () => {
+            if(container) resizeObserver.unobserve(container);
+        };
+    }, [props.mobileBreakpoint]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -520,25 +533,17 @@ export function WebGLSlider(props: any) {
             if (e.code === "Space" || e.code === "ArrowRight") { handleSlideChange(); }
             else if (e.code === "ArrowLeft") { navigateToSlide((currentSlideIndexRef.current - 1 + slides.length) % slides.length); }
         };
-        const handleClick = (e: MouseEvent) => {
-            if ((e.target as HTMLElement).closest('[data-nav-item]') || props.mode === 'scroll') return;
-            stopAutoSlideTimer();
-            onProgressUpdate(0);
-            handleSlideChange();
-        };
 
         const resizeObserver = new ResizeObserver(handleResize);
         if(parent) resizeObserver.observe(parent);
         
         document.addEventListener('keydown', handleKeyDown);
-        parent?.addEventListener('click', handleClick);
 
         return () => {
             isMounted = false;
             stopAutoSlideTimer();
             if(parent) resizeObserver.unobserve(parent);
             document.removeEventListener('keydown', handleKeyDown);
-            parent?.removeEventListener('click', handleClick);
             threeState.renderer?.dispose();
         };
     }, [slides.map(s=>s.media).join(',')]);
@@ -547,19 +552,21 @@ export function WebGLSlider(props: any) {
         const parent = canvasRef.current?.parentElement;
         if (!parent) return;
 
-        const lastWheelTime = { current: 0 };
-
+        const SCROLL_THRESHOLD = 50;
+        
         const handleWheel = (e: WheelEvent) => {
             if (isTransitioning.current) return;
             e.preventDefault();
-            const now = Date.now();
-            if (now - lastWheelTime.current < 500) return;
-            lastWheelTime.current = now;
+            
+            scrollAccumulator.current += e.deltaY;
 
-            if (e.deltaY > 0) {
-                handleSlideChange();
-            } else {
-                navigateToSlide((currentSlideIndexRef.current - 1 + slides.length) % slides.length);
+            if (Math.abs(scrollAccumulator.current) > SCROLL_THRESHOLD) {
+                if (scrollAccumulator.current > 0) {
+                    handleSlideChange();
+                } else {
+                    navigateToSlide((currentSlideIndexRef.current - 1 + slides.length) % slides.length);
+                }
+                scrollAccumulator.current = 0;
             }
         };
 
@@ -589,25 +596,69 @@ export function WebGLSlider(props: any) {
     }, [allProps]);
 
     return (
-        <div style={styles.body}>
+        <div ref={containerRef} style={styles.body}>
             <main style={styles.sliderWrapper}>
                 <canvas ref={canvasRef} style={styles.webglCanvas}></canvas>
                 {slides.length > 0 && (
                     <>
-                        <span style={styles.slideNumber}>{String(currentSlideIndex + 1).padStart(2, '0')}</span>
-                        <span style={styles.slideTotal}>{String(slides.length).padStart(2, '0')}</span>
-                        <nav style={styles.slidesNavigation}>
-                            {slides.map((slide, index) => (
-                                <div key={index} data-nav-item="true" style={styles.slideNavItem} onClick={(e) => { e.stopPropagation(); navigateToSlide(index); }}>
-                                    <div style={styles.slideProgressLine}>
-                                        <div style={{...styles.slideProgressFill, width: index === currentSlideIndex ? `${slideProgress}%` : '0%'}}></div>
-                                    </div>
-                                    <div style={{...styles.slideNavTitle, ...(index === currentSlideIndex && styles.slideNavTitleActive)}}>
-                                        {slide.title}
-                                    </div>
-                                </div>
-                            ))}
-                        </nav>
+                        {props.showSlideNumbers && (
+                             <>
+                                <span style={{
+                                    ...styles.slideNumber,
+                                    left: isMobile ? props.mobileNavHorizontalPadding : props.navHorizontalPadding,
+                                    fontSize: isMobile ? props.mobileNumberFontSize : props.numberFontSize,
+                                }}>
+                                    {String(currentSlideIndex + 1).padStart(2, '0')}
+                                </span>
+                                <span style={{
+                                    ...styles.slideTotal,
+                                    right: isMobile ? props.mobileNavHorizontalPadding : props.navHorizontalPadding,
+                                    fontSize: isMobile ? props.mobileNumberFontSize : props.numberFontSize,
+                                }}>
+                                    {String(slides.length).padStart(2, '0')}
+                                </span>
+                            </>
+                        )}
+                        {props.showNavBar && (
+                            <nav style={{
+                                ...styles.slidesNavigation,
+                                bottom: isMobile ? props.mobileNavVerticalPadding : props.navVerticalPadding,
+                                left: isMobile ? props.mobileNavHorizontalPadding : props.navHorizontalPadding,
+                                right: isMobile ? props.mobileNavHorizontalPadding : props.navHorizontalPadding,
+                            }}>
+                                {slides.map((slide, index) => (
+                                    <motion.button key={index} data-nav-item="true" style={styles.slideNavItem} onClick={(e) => { e.stopPropagation(); navigateToSlide(index); }}>
+                                        <motion.div
+                                            style={{
+                                                position: 'absolute',
+                                                top: 0, left: 0, right: 0, bottom: 0,
+                                                backgroundColor: theme.colorText,
+                                                zIndex: 0,
+                                            }}
+                                            initial={{ opacity: 0 }}
+                                            whileHover={{ opacity: 0.08 }}
+                                            transition={{ duration: 0.3 }}
+                                        />
+                                        {props.showProgressBars && (
+                                            <div style={{...styles.slideProgressLine, position: 'relative', zIndex: 1}}>
+                                                <div style={{...styles.slideProgressFill, width: index === currentSlideIndex ? (props.mode === 'auto' ? `${slideProgress}%` : '100%') : '0%'}}></div>
+                                            </div>
+                                        )}
+                                        {props.showNavTitles && (
+                                            <div style={{
+                                                ...styles.slideNavTitle,
+                                                ...(index === currentSlideIndex && styles.slideNavTitleActive),
+                                                position: 'relative',
+                                                zIndex: 1,
+                                                fontSize: isMobile ? props.mobileTitleFontSize : props.titleFontSize,
+                                            }}>
+                                                {slide.title}
+                                            </div>
+                                        )}
+                                    </motion.button>
+                                ))}
+                            </nav>
+                        )}
                     </>
                 )}
             </main>
@@ -616,52 +667,91 @@ export function WebGLSlider(props: any) {
 }
 
 WebGLSlider.defaultProps = {
-    mode: "auto",
-    media1: "https://assets.codepen.io/7558/orange-portrait-001.jpg",
-    title1: "Ethereal Glow",
-    media2: "https://assets.codepen.io/7558/orange-portrait-002.jpg",
-    title2: "Rose Mirage",
-    media3: "https://assets.codepen.io/7558/orange-portrait-003.jpg",
-    title3: "Velvet Mystique",
-    media4: "https://assets.codepen.io/7558/orange-portrait-004.jpg",
-    title4: "Golden Hour",
-    media5: "https://assets.codepen.io/7558/orange-portrait-005.jpg",
-    title5: "Midnight Dreams",
-    media6: "https://assets.codepen.io/7558/orange-portrait-006.jpg",
-    title6: "Silver Light",
+    // Media
+    media1: "https://assets.codepen.io/7558/orange-portrait-001.jpg", title1: "Ethereal Glow",
+    media2: "https://assets.codepen.io/7558/orange-portrait-002.jpg", title2: "Rose Mirage",
+    media3: "https://assets.codepen.io/7558/orange-portrait-003.jpg", title3: "Velvet Mystique",
+    media4: "https://assets.codepen.io/7558/orange-portrait-004.jpg", title4: "Golden Hour",
+    media5: "https://assets.codepen.io/7558/orange-portrait-005.jpg", title5: "Midnight Dreams",
+    media6: "https://assets.codepen.io/7558/orange-portrait-006.jpg", title6: "Silver Light",
+    
+    // UI
+    showSlideNumbers: true, showNavBar: true, showProgressBars: true, showNavTitles: true,
+    navVerticalPadding: 32, navHorizontalPadding: 32, numberFontSize: 12, titleFontSize: 11,
+
+    // Responsive
+    mobileBreakpoint: 600, mobileNavVerticalPadding: 16, mobileNavHorizontalPadding: 16,
+    mobileNumberFontSize: 12, mobileTitleFontSize: 10,
+
+    // Behavior & Effects
     ...{
-      transitionDuration: 2.5, autoSlideSpeed: 5000, currentEffect: "glass",
-      globalIntensity: 1.0, speedMultiplier: 1.0, distortionStrength: 1.0, colorEnhancement: 1.0,
-      vignetteStrength: 0.3, grainIntensity: 0.1, glassRefractionStrength: 1.0,
-      glassChromaticAberration: 1.0, glassBubbleClarity: 1.0, glassEdgeGlow: 1.0,
-      glassLiquidFlow: 1.0, frostIntensity: 1.5, frostCrystalSize: 1.0, frostIceCoverage: 1.0,
-      frostTemperature: 1.0, frostTexture: 1.0, rippleFrequency: 25.0, rippleAmplitude: 0.08,
-      rippleWaveSpeed: 1.0, rippleRippleCount: 1.0, rippleDecay: 1.0, plasmaSpeed: 0.6,
-      plasmaEnergyIntensity: 0.6, plasmaContrastBoost: 0.4, plasmaTurbulence: 1.0,
-      timeshiftDistortion: 1.6, timeshiftBlur: 1.5, timeshiftFlow: 1.4, timeshiftChromatic: 1.5,
-      timeshiftTurbulence: 1.4, glitchBlockSize: 12.0, glitchIntensity: 0.6, glitchScanlines: 0.2,
-      glitchColorShift: 0.3, glitchSpeed: 1.0, warpStrength: 1.2, warpRadius: 0.6,
-      warpTwist: 1.0, warpTurbulence: 1.5, warpChromaticAberration: 1.0, warpSpeed: 1.0,
+      mode: "auto",
+      transitionDuration: 1.8,
+      transitionEase: "expo.inOut",
+      autoSlideSpeed: 5000,
+      currentEffect: "glass",
+      globalIntensity: 1.0, speedMultiplier: 1.0, distortionStrength: 1.0,
+      colorEnhancement: 1.0, vignetteStrength: 0.3, grainIntensity: 0.1,
+      glassRefractionStrength: 1.0, glassChromaticAberration: 1.0, glassBubbleClarity: 1.0,
+      glassEdgeGlow: 1.0, glassLiquidFlow: 1.0,
+      frostIntensity: 1.5, frostCrystalSize: 1.0, frostIceCoverage: 1.0,
+      frostTemperature: 1.0, frostTexture: 1.0,
+      rippleFrequency: 25.0, rippleAmplitude: 0.08, rippleWaveSpeed: 1.0,
+      rippleRippleCount: 1.0, rippleDecay: 1.0,
+      plasmaSpeed: 0.6, plasmaEnergyIntensity: 0.6, plasmaContrastBoost: 0.4, plasmaTurbulence: 1.0,
+      timeshiftDistortion: 1.6, timeshiftBlur: 1.5, timeshiftFlow: 1.4,
+      timeshiftChromatic: 1.5, timeshiftTurbulence: 1.4,
+      glitchBlockSize: 12.0, glitchIntensity: 0.6, glitchScanlines: 0.2,
+      glitchColorShift: 0.3, glitchSpeed: 1.0,
+      warpStrength: 1.2, warpRadius: 0.6, warpTwist: 1.0, warpTurbulence: 1.5,
+      warpChromaticAberration: 1.0, warpSpeed: 1.0,
     }
 };
 
 addPropertyControls(WebGLSlider, {
-    media1: { type: ControlType.Image, title: "Image 1" },
-    title1: { type: ControlType.String, title: "Title 1" },
-    media2: { type: ControlType.Image, title: "Image 2" },
-    title2: { type: ControlType.String, title: "Title 2" },
-    media3: { type: ControlType.Image, title: "Image 3" },
-    title3: { type: ControlType.String, title: "Title 3" },
-    media4: { type: ControlType.Image, title: "Image 4" },
-    title4: { type: ControlType.String, title: "Title 4" },
-    media5: { type: ControlType.Image, title: "Image 5" },
-    title5: { type: ControlType.String, title: "Title 5" },
-    media6: { type: ControlType.Image, title: "Image 6" },
-    title6: { type: ControlType.String, title: "Title 6" },
+    // Media
+    // Fix: Replaced invalid ControlType.Title with ControlType.Boolean as a workaround to create a section title.
+    _media_title: { type: ControlType.Boolean, title: "Media", defaultValue: false },
+    media1: { type: ControlType.Image, title: "Image 1" }, title1: { type: ControlType.String, title: "Title 1" },
+    media2: { type: ControlType.Image, title: "Image 2" }, title2: { type: ControlType.String, title: "Title 2" },
+    media3: { type: ControlType.Image, title: "Image 3" }, title3: { type: ControlType.String, title: "Title 3" },
+    media4: { type: ControlType.Image, title: "Image 4" }, title4: { type: ControlType.String, title: "Title 4" },
+    media5: { type: ControlType.Image, title: "Image 5" }, title5: { type: ControlType.String, title: "Title 5" },
+    media6: { type: ControlType.Image, title: "Image 6" }, title6: { type: ControlType.String, title: "Title 6" },
+    
+    // UI Customization
+    // Fix: Replaced invalid ControlType.Title with ControlType.Boolean as a workaround to create a section title.
+    _ui_title: { type: ControlType.Boolean, title: "UI Customization", defaultValue: false },
+    showSlideNumbers: { type: ControlType.Boolean, title: "Show Numbers", defaultValue: true },
+    showNavBar: { type: ControlType.Boolean, title: "Show Nav Bar", defaultValue: true },
+    showProgressBars: { type: ControlType.Boolean, title: "Show Progress", defaultValue: true, hidden: (props) => !props.showNavBar },
+    showNavTitles: { type: ControlType.Boolean, title: "Show Titles", defaultValue: true, hidden: (props) => !props.showNavBar },
+    navVerticalPadding: { type: ControlType.Number, title: "Nav Padding Y", min: 0, max: 100, step: 1, displayStepper: true, defaultValue: 32 },
+    navHorizontalPadding: { type: ControlType.Number, title: "Nav Padding X", min: 0, max: 100, step: 1, displayStepper: true, defaultValue: 32 },
+    numberFontSize: { type: ControlType.Number, title: "Number Font Size", min: 8, max: 32, step: 1, displayStepper: true, defaultValue: 12 },
+    titleFontSize: { type: ControlType.Number, title: "Title Font Size", min: 8, max: 32, step: 1, displayStepper: true, defaultValue: 11 },
+
+    // Responsive
+    // Fix: Replaced invalid ControlType.Title with ControlType.Boolean as a workaround to create a section title.
+    _responsive_title: { type: ControlType.Boolean, title: "Responsive", defaultValue: false },
+    mobileBreakpoint: { type: ControlType.Number, title: "Breakpoint (px)", min: 300, max: 1200, step: 10, defaultValue: 600, displayStepper: true },
+    mobileNavVerticalPadding: { type: ControlType.Number, title: "📱 Nav Padding Y", min: 0, max: 100, step: 1, displayStepper: true, defaultValue: 16 },
+    mobileNavHorizontalPadding: { type: ControlType.Number, title: "📱 Nav Padding X", min: 0, max: 100, step: 1, displayStepper: true, defaultValue: 16 },
+    mobileNumberFontSize: { type: ControlType.Number, title: "📱 Number Font Size", min: 8, max: 32, step: 1, displayStepper: true, defaultValue: 12 },
+    mobileTitleFontSize: { type: ControlType.Number, title: "📱 Title Font Size", min: 8, max: 32, step: 1, displayStepper: true, defaultValue: 10 },
+    
+    // Timing & Behavior
+    // Fix: Replaced invalid ControlType.Title with ControlType.Boolean as a workaround to create a section title.
+    _behavior_title: { type: ControlType.Boolean, title: "Timing & Behavior", defaultValue: false },
     mode: { type: ControlType.Enum, title: "Mode", options: ["auto", "scroll"] },
     transitionDuration: { type: ControlType.Number, title: "Transition Duration", min: 0.5, max: 5, step: 0.1, displayStepper: true },
+    transitionEase: { type: ControlType.Enum, title: "Easing", options: ["none", "power2.inOut", "power3.inOut", "power4.inOut", "expo.inOut", "circ.inOut", "back.inOut"], optionTitles: ["Linear", "P2", "P3", "P4", "Expo", "Circ", "Back"], },
     autoSlideSpeed: { type: ControlType.Number, title: "Auto-Slide Speed", min: 2000, max: 10000, step: 100, displayStepper: true, hidden: (props) => props.mode !== 'auto' },
-    currentEffect: { type: ControlType.Enum, title: "Effect", options: ["glass", "frost", "ripple", "plasma", "timeshift", "glitch", "warp"] },
+    
+    // Effects
+    // Fix: Replaced invalid ControlType.Title with ControlType.Boolean as a workaround to create a section title.
+    _effects_title: { type: ControlType.Boolean, title: "Effects", defaultValue: false },
+    currentEffect: { type: ControlType.Enum, title: "Effect Type", options: ["glass", "frost", "ripple", "plasma", "timeshift", "glitch", "warp"] },
     globalIntensity: { type: ControlType.Number, title: "Global Intensity", min: 0.1, max: 2, step: 0.1, displayStepper: true },
     speedMultiplier: { type: ControlType.Number, title: "Speed Multiplier", min: 0.1, max: 3, step: 0.1, displayStepper: true },
     distortionStrength: { type: ControlType.Number, title: "Distortion", min: 0.1, max: 3, step: 0.1, displayStepper: true },

@@ -84,6 +84,8 @@ export const styles: { [key: string]: React.CSSProperties } = {
     right: theme.spacingSm,
   },
   slideNavItem: {
+    position: 'relative',
+    overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
     cursor: 'pointer',
@@ -91,6 +93,7 @@ export const styles: { [key: string]: React.CSSProperties } = {
     flex: 1,
     border: 'none',
     background: 'none',
+    textAlign: 'left',
   },
   slideNavItemMobile: {
     padding: '0.75rem',

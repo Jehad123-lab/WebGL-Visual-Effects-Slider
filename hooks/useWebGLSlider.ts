@@ -13,15 +13,17 @@ interface UseWebGLSliderProps {
     canvasRef: React.RefObject<HTMLCanvasElement>;
     onSlideChange: (index: number) => void;
     onProgressUpdate: (progress: number) => void;
+    onModeChange: (mode: string) => void;
 }
 
-export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: UseWebGLSliderProps) => {
+export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate, onModeChange }: UseWebGLSliderProps) => {
     const threeState = useRef<any>({}).current; // To store all non-React state
     const isTransitioning = useRef(false);
     const sliderEnabled = useRef(false);
     const progressAnimation = useRef<ReturnType<typeof setInterval> | null>(null);
     const autoSlideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentSlideIndexRef = useRef(0);
+    const scrollAccumulator = useRef(0);
 
     const startAutoSlideTimerRef = useRef<(() => void) | null>(null);
 
@@ -66,7 +68,7 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
             {
                 value: 1,
                 duration: SLIDER_CONFIG.settings.transitionDuration,
-                ease: "power2.inOut",
+                ease: SLIDER_CONFIG.settings.transitionEase,
                 onComplete: () => {
                     shaderMaterial.uniforms.uProgress.value = 0;
                     shaderMaterial.uniforms.uTexture1.value = targetTexture;
@@ -128,7 +130,7 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
         if (!canvas) return;
 
         let isMounted = true;
-        const lastWheelTime = { current: 0 };
+        const SCROLL_THRESHOLD = 50;
         
         const setupPane = () => {
           const pane = new Pane({ title: "Visual Effects Controls" });
@@ -145,7 +147,7 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
             const { settings } = SLIDER_CONFIG;
             Object.keys(settings).forEach(key => {
                 const uniformKey = `u${key.charAt(0).toUpperCase() + key.slice(1)}`;
-                if (uniforms[uniformKey] && key !== 'currentEffect' && key !== 'currentEffectPreset' && key !== 'mode') {
+                if (uniforms[uniformKey] && key !== 'currentEffect' && key !== 'currentEffectPreset' && key !== 'mode' && key !== 'transitionEase') {
                     uniforms[uniformKey].value = (settings as any)[key];
                 }
             });
@@ -163,6 +165,18 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
             const timingFolder = pane.addFolder({ title: "Timing & Mode" });
             timingFolder.addBinding(SLIDER_CONFIG.settings, "mode", { label: "Mode", options: { Auto: 'auto', Scroll: 'scroll' } });
             timingFolder.addBinding(SLIDER_CONFIG.settings, "transitionDuration", { label: "Transition Duration", min: 0.5, max: 5.0, step: 0.1 });
+            timingFolder.addBinding(SLIDER_CONFIG.settings, "transitionEase", {
+                label: "Transition Easing",
+                options: {
+                    Linear: "none",
+                    "Power2 In/Out": "power2.inOut",
+                    "Power3 In/Out": "power3.inOut",
+                    "Power4 In/Out": "power4.inOut",
+                    "Expo In/Out": "expo.inOut",
+                    "Circ In/Out": "circ.inOut",
+                    "Back In/Out": "back.inOut",
+                },
+            });
             timingFolder.addBinding(SLIDER_CONFIG.settings, "autoSlideSpeed", { label: "Auto Slide Speed", min: 2000, max: 10000, step: 500 });
 
             const effectFolder = pane.addFolder({ title: "Effect Selection" });
@@ -268,6 +282,7 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
                 } else if (key === 'currentEffectPreset') {
                     applyEffectPreset(SLIDER_CONFIG.settings.currentEffect, SLIDER_CONFIG.settings.currentEffectPreset);
                 } else if (key === 'mode') {
+                    onModeChange(SLIDER_CONFIG.settings.mode);
                     if (SLIDER_CONFIG.settings.mode === 'auto') {
                         startAutoSlideTimer();
                     } else {
@@ -423,36 +438,29 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
                  if (paneElement) paneElement.style.display = paneElement.style.display === 'none' ? 'block' : 'none';
             }
         };
-        
-        const handleClick = (e: MouseEvent) => {
-            if ((e.target as HTMLElement).closest('.slides-navigation') || (e.target as HTMLElement).closest('.tp-dfwv')) return;
-            if (SLIDER_CONFIG.settings.mode === 'scroll') return;
-            stopAutoSlideTimer();
-            quickResetProgress();
-            handleSlideChange();
-        };
 
         const handleWheel = (e: WheelEvent) => {
             if (SLIDER_CONFIG.settings.mode !== 'scroll' || isTransitioning.current) return;
             e.preventDefault();
-            const now = Date.now();
-            if (now - lastWheelTime.current < 500) return;
-            lastWheelTime.current = now;
             
-            stopAutoSlideTimer();
-            quickResetProgress();
+            scrollAccumulator.current += e.deltaY;
 
-            if (e.deltaY > 0) {
-                handleSlideChange();
-            } else if (e.deltaY < 0) {
-                const prevIndex = (currentSlideIndexRef.current - 1 + slides.length) % slides.length;
-                navigateToSlide(prevIndex);
+            if (Math.abs(scrollAccumulator.current) > SCROLL_THRESHOLD) {
+                stopAutoSlideTimer();
+                quickResetProgress();
+
+                if (scrollAccumulator.current > 0) {
+                    handleSlideChange();
+                } else {
+                    const prevIndex = (currentSlideIndexRef.current - 1 + slides.length) % slides.length;
+                    navigateToSlide(prevIndex);
+                }
+                scrollAccumulator.current = 0;
             }
         };
 
         window.addEventListener('resize', handleResize);
         document.addEventListener('keydown', handleKeyDown);
-        document.addEventListener('click', handleClick);
         document.addEventListener('wheel', handleWheel, { passive: false });
 
         return () => {
@@ -460,13 +468,12 @@ export const useWebGLSlider = ({ canvasRef, onSlideChange, onProgressUpdate }: U
             stopAutoSlideTimer();
             window.removeEventListener('resize', handleResize);
             document.removeEventListener('keydown', handleKeyDown);
-            document.removeEventListener('click', handleClick);
             document.removeEventListener('wheel', handleWheel);
             threeState.pane?.dispose();
             if (threeState.styleTag) document.head.removeChild(threeState.styleTag);
             threeState.renderer?.dispose();
         };
-    }, [canvasRef, startAutoSlideTimer, stopAutoSlideTimer, handleSlideChange, navigateToSlide, quickResetProgress, onProgressUpdate]);
+    }, [canvasRef, startAutoSlideTimer, stopAutoSlideTimer, handleSlideChange, navigateToSlide, quickResetProgress, onProgressUpdate, onModeChange]);
 
     return { navigateToSlide, handleSlideChange, stopAutoSlideTimer, quickResetProgress };
 };

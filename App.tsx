@@ -3,11 +3,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useWebGLSlider } from './hooks/useWebGLSlider';
 import { SliderUI } from './components/SliderUI';
 import { styles } from './styles';
+import { SLIDER_CONFIG } from './config/sliderConfig';
 
 const App: React.FC = () => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [slideProgress, setSlideProgress] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 600);
+  const [mode, setMode] = useState(SLIDER_CONFIG.settings.mode);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -15,6 +17,7 @@ const App: React.FC = () => {
     canvasRef,
     onSlideChange: setCurrentSlideIndex,
     onProgressUpdate: setSlideProgress,
+    onModeChange: setMode,
   });
 
   useEffect(() => {
@@ -31,6 +34,7 @@ const App: React.FC = () => {
                 currentSlideIndex={currentSlideIndex}
                 slideProgress={slideProgress}
                 isMobile={isMobile}
+                mode={mode}
                 onNavigate={(index) => {
                     stopAutoSlideTimer();
                     quickResetProgress();

@@ -1,4 +1,3 @@
-https://ai.studio/apps/drive/1VsPHhvJ_kqmlLF2Y7xrgOEK-SZHtmkBM
 
 # WebGL Visual Effects Slider
 
